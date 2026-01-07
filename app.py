@@ -23,13 +23,16 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 @st.cache_data
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        st.error(f"Error: '{DATA_FILE}' not found. Please run the data generation script first.")
+def load_data(uploaded_file):
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    elif os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+    else:
         return pd.DataFrame()
     
-    df = pd.read_csv(DATA_FILE)
-    df['Date'] = pd.to_datetime(df['Date'])
+    if 'Date' in df.columns:
+        df['Date'] = pd.to_datetime(df['Date'])
     return df
 
 @st.cache_resource
@@ -42,6 +45,9 @@ class IntelligentBudgetSystem:
         self.accuracy = 0.0
 
     def train_models(self, df):
+        if df.empty:
+            return pd.DataFrame()
+
         X = df["Description"]
         y = df["Category"]
         
@@ -73,9 +79,15 @@ class IntelligentBudgetSystem:
             return "Unknown"
 
     def predict_next_month(self, next_month_idx):
-        return self.regressor.predict([[next_month_idx]])[0]
+        try:
+            return self.regressor.predict([[next_month_idx]])[0]
+        except:
+            return 0
 
-df = load_data()
+st.sidebar.title("Smart Budget PK")
+uploaded_file = st.sidebar.file_uploader("Upload Transaction CSV", type=["csv"])
+
+df = load_data(uploaded_file)
 
 if not df.empty:
     if 'ml_system' not in st.session_state:
@@ -84,11 +96,8 @@ if not df.empty:
     
     system = st.session_state.ml_system
     
-    st.sidebar.title("Smart Budget PK")
-    
     unique_categories = list(set(df["Category"].unique()))
     st.sidebar.info(f"Tracking {len(unique_categories)} Unique Categories")
-    
     st.sidebar.markdown(f"**Model Accuracy:** `{system.accuracy * 100:.2f}%`")
     
     menu = st.sidebar.radio("Navigation", ["Dashboard", "AI Categorizer", "Budget Forecast"])
@@ -113,14 +122,17 @@ if not df.empty:
         with col_right:
             st.subheader("Monthly Spending Trend")
             monthly = st.session_state.monthly_data
-            fig_bar = px.bar(monthly, x="Month", y="Amount", title="Monthly Expenses")
-            st.plotly_chart(fig_bar, use_container_width=True)
+            if not monthly.empty:
+                fig_bar = px.bar(monthly, x="Month", y="Amount", title="Monthly Expenses")
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("Not enough data for monthly trends.")
 
     elif menu == "AI Categorizer":
         st.title("AI Transaction Categorizer")
-        st.info("The system learned from your CSV dataset. Test the classification below.")
+        st.info("The system learned from your dataset. Test the classification below.")
         
-        user_text = st.text_input("Enter Transaction Description (e.g., 'Careem ride to office')", "")
+        user_text = st.text_input("Enter Transaction Description", "")
         
         if st.button("Categorize"):
             if user_text:
@@ -142,7 +154,10 @@ if not df.empty:
         predicted_amt = system.predict_next_month(next_month_idx)
         
         savings = income - predicted_amt
-        adherence_rate = (savings / income) * 100
+        if income > 0:
+            adherence_rate = (savings / income) * 100
+        else:
+            adherence_rate = 0
         
         c1, c2 = st.columns(2)
         c1.metric("Predicted Expense (Next Month)", f"PKR {predicted_amt:,.0f}")
@@ -154,4 +169,4 @@ if not df.empty:
             st.success("Status: You are projected to stay within budget.")
 
 else:
-    st.warning("Data not found. Please run the data generation script to create 'pakistan_finance_data.csv' first.")
+    st.warning("Please upload a CSV file or run the generator script to create 'pakistan_finance_data.csv'.")
